@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Wykrywanie Anomalii</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <h1>Wykrywanie Anomalii</h1>
+  <form id="uploadForm" enctype="multipart/form-data">
+    <!-- Ukryte pole pliku -->
+    <input type="file" name="file" id="fileInput" accept=".csv, .xls, .xlsx" required hidden>
+    <!-- Etykieta stylizowana jak przycisk, która otwiera okno wyboru pliku i wyświetla wybraną nazwę -->
+    <label for="fileInput" id="fileLabel" class="custom-file-label">Wybierz plik</label>
+    <button type="submit">Prześlij plik</button>
+  </form>
+  <div id="results" class="results-container"></div>
+
+  <script>
+    const form = document.getElementById('uploadForm');
+    const resultsDiv = document.getElementById('results');
+    const fileInput = document.getElementById('fileInput');
+    const fileLabel = document.getElementById('fileLabel');
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) {
+        fileLabel.textContent = fileInput.files[0].name;
+      } else {
+        fileLabel.textContent = 'Wybierz plik';
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      resultsDiv.innerHTML = '<p>Przetwarzanie pliku, proszę czekać...</p>';
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+        const response = await fetch('/anomaly/upload', {
+          method: 'POST',
+          body: formData
+        });
+      
+        const result = await response.json();
+        displayResults(result);
+      } catch (err) {
+        resultsDiv.innerHTML = '<p class="warning">Wystąpił błąd podczas przetwarzania pliku.</p>';
+      }
+    });
+
+    function displayResults(data) {
+      resultsDiv.innerHTML = '';
+      if (!data || Object.keys(data).length === 0) {
+        resultsDiv.innerHTML = '<p>Brak wyników do wyświetlenia.</p>';
+        return;
+      }
+
+      for (const tag in data) {
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'group';
+        
+        const groupTitle = document.createElement('h2');
+        groupTitle.textContent = `Tag: ${tag}`;
+        groupDiv.appendChild(groupTitle);
+
+        // Wyniki metody z-score
+        if (data[tag].zScore) {
+          if (data[tag].zScore.warning) {
+            const warningMsg = document.createElement('p');
+            warningMsg.className = 'warning';
+            warningMsg.textContent = data[tag].zScore.warning;
+            groupDiv.appendChild(warningMsg);
+          } else if (data[tag].zScore.anomalies && data[tag].zScore.anomalies.length > 0) {
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            ['Algorytm', 'Kolumna', 'Wartość', 'Z-Score'].forEach(headerText => {
+              const th = document.createElement('th');
+              th.textContent = headerText;
+              headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            data[tag].zScore.anomalies.forEach(anomaly => {
+              const row = document.createElement('tr');
+              
+              const cellAlgo = document.createElement('td');
+              cellAlgo.textContent = anomaly.algorithm;
+              row.appendChild(cellAlgo);
+
+              const cellColumn = document.createElement('td');
+              cellColumn.textContent = anomaly.column;
+              row.appendChild(cellColumn);
+
+              const cellValue = document.createElement('td');
+              cellValue.textContent = anomaly.value;
+              row.appendChild(cellValue);
+
+              const cellZScore = document.createElement('td');
+              cellZScore.textContent = anomaly.zScore ? anomaly.zScore.toFixed(2) : '-';
+              row.appendChild(cellZScore);
+
+              tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+            groupDiv.appendChild(table);
+          } else {
+            const noMsg = document.createElement('p');
+            noMsg.textContent = 'Brak wykrytych anomalii metodą z-score.';
+            groupDiv.appendChild(noMsg);
+          }
+        }
+
+        // Wyniki metody Isolation Forest
+        if (data[tag].isolationForest) {
+          if (data[tag].isolationForest.warning) {
+            const warningMsg = document.createElement('p');
+            warningMsg.className = 'warning';
+            warningMsg.textContent = data[tag].isolationForest.warning;
+            groupDiv.appendChild(warningMsg);
+          } else if (data[tag].isolationForest.anomalies && data[tag].isolationForest.anomalies.length > 0) {
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            ['Algorytm', 'Kolumna', 'Wartość'].forEach(headerText => {
+              const th = document.createElement('th');
+              th.textContent = headerText;
+              headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            data[tag].isolationForest.anomalies.forEach(anomaly => {
+              const row = document.createElement('tr');
+              
+              const cellAlgo = document.createElement('td');
+              cellAlgo.textContent = anomaly.algorithm;
+              row.appendChild(cellAlgo);
+
+              const cellColumn = document.createElement('td');
+              cellColumn.textContent = anomaly.column;
+              row.appendChild(cellColumn);
+
+              const cellValue = document.createElement('td');
+              cellValue.textContent = anomaly.value;
+              row.appendChild(cellValue);
+
+              tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+            groupDiv.appendChild(table);
+          } else {
+            const noMsg = document.createElement('p');
+            noMsg.textContent = 'Brak wykrytych anomalii metodą Isolation Forest.';
+            groupDiv.appendChild(noMsg);
+          }
+        }
+
+        resultsDiv.appendChild(groupDiv);
+      }
+    }
+  </script>
+</body>
+</html>

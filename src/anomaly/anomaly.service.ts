@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
-// Importujemy moduł Isolation Forest zgodnie z CommonJS
-import IsolationForest = require('isolation-forest');
+import { IsolationForest } from 'ml-isolation-forest';
 import { File as MulterFile } from 'multer';
 
 @Injectable()
@@ -70,9 +69,8 @@ export class AnomalyService {
     const results: any = {};
     Object.keys(groupedData).forEach(tag => {
       const records = groupedData[tag];
-      // Wybieramy kolumny zawierające słowo "kwota" (bez względu na wielkość liter)
       const kwotaCols = Object.keys(records[0]).filter(col =>
-        col.toLowerCase().includes('kwota'),
+        col.toLowerCase().includes('kwota')
       );
 
       if (records.length < 10) {
@@ -99,7 +97,7 @@ export class AnomalyService {
               anomalies.push({
                 record,
                 column: col,
-                value,
+                value: value,
                 zScore: z,
                 algorithm: 'zScore',
               });
@@ -113,14 +111,13 @@ export class AnomalyService {
     return results;
   }
 
-  // Wykrywanie anomalii przy użyciu Isolation Forest (przy użyciu wszystkich kolumn "kwota" jako cech)
+  // Wykrywanie anomalii przy użyciu Isolation Forest (przyjmujemy, że model zwraca miary anomalii)
   detectAnomaliesIsolationForest(groupedData: Record<string, any[]>): any {
     const results: any = {};
     Object.keys(groupedData).forEach(tag => {
       const records = groupedData[tag];
-      // Pobieramy wszystkie kolumny, których nazwa zawiera "kwota"
       const kwotaCols = Object.keys(records[0]).filter(col =>
-        col.toLowerCase().includes('kwota'),
+        col.toLowerCase().includes('kwota')
       );
 
       if (records.length < 10) {
@@ -133,12 +130,12 @@ export class AnomalyService {
       }
 
       // Przygotowujemy próbki jako wektory: każda próbka to tablica wartości z wszystkich kolumn "kwota"
-      const samples = records.map(record => {
-        return kwotaCols.map(col => {
+      const samples = records.map(record =>
+        kwotaCols.map(col => {
           const value = Number(record[col]);
           return isNaN(value) ? null : value;
-        });
-      }).filter(sample => !sample.some(val => val === null)); // pomijamy rekordy z niepoprawnymi danymi
+        })
+      ).filter(sample => !sample.some(val => val === null));
 
       if (samples.length === 0) {
          results[tag] = { warning: 'Brak poprawnych danych liczbowych w kolumnach "Kwota"', anomalies: [] };
@@ -146,25 +143,27 @@ export class AnomalyService {
       }
       
       try {
-        // Dynamicznie ustawiamy parametr contamination
-        const contaminationParam = Math.min(0.05, 1 / samples.length);
-        const IsolationForestAny = IsolationForest as any;
-        const isolationForest = new IsolationForestAny({
-          nEstimators: 100,
-          contamination: contaminationParam,
-        });
-        isolationForest.fit(samples);
-        const predictions = isolationForest.predict(samples); // predykcja: -1 oznacza anomalię
+        // Dynamiczne ustawienie parametru contamination – zwiększamy wartość dla małych zbiorów
+        const contaminationParam = Math.max(0.05, 1 / samples.length);
+        const options = { nTrees: 100, contamination: contaminationParam };
+        const forest = new IsolationForest(options);
+        forest.train(samples);
+        const predictions = forest.predict(samples); // Zakładamy, że predictions to miary anomalii
 
-        // Dla każdej próbki, jeśli predykcja to -1, dodajemy rekord jako anomalię
+        // Ustalamy próg – przykładowo 0.6; jeśli wynik >= thresholdScore, próbka jest uznawana za anomalie
+        const thresholdScore = 0.6;
         const anomalies = [];
         records.forEach((record, i) => {
-          if (predictions[i] === -1) {
-            anomalies.push({
-              record,
-              features: samples[i],
-              columns: kwotaCols,
-              algorithm: 'IsolationForest',
+          if (predictions[i] >= thresholdScore) {
+            // Dla każdego rekordu, iterujemy po kolumnach, tworząc osobny wpis
+            kwotaCols.forEach(col => {
+              anomalies.push({
+                record,
+                column: col,
+                value: record[col],
+                anomalyScore: predictions[i],
+                algorithm: 'IsolationForest',
+              });
             });
           }
         });
